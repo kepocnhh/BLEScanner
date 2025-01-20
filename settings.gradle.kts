@@ -1,0 +1,3 @@
+rootProject.name = "BLEScanner"
+
+include("app")
