@@ -1,5 +1,6 @@
 package test.android.bles.module.bt
 
+import android.Manifest
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -10,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
@@ -83,9 +85,10 @@ internal class BLEScannerService : Service() {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             if (result == null) return
+            logger.debug("on scan result: $result")
             val device = BTDevice(
-                address = result.device.address,
-                name = result.device.name,
+                address = result.device.address ?: return,
+                name = result.device.name ?: return,
             )
             coroutineScope.launch {
                 _events.emit(
@@ -101,9 +104,18 @@ internal class BLEScannerService : Service() {
             runCatching {
                 withContext(Dispatchers.Default) {
                     val adapter = getSystemService(BluetoothManager::class.java).adapter
-                    check(adapter.isEnabled)
+                    check(adapter.isEnabled) { "BT adapter is disabled!" }
                     val lm = getSystemService(LocationManager::class.java)
-                    check(lm.isProviderEnabled(LocationManager.GPS_PROVIDER))
+                    check(lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) { "GPS provider is disabled!" }
+                    val permissions = arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    )
+                    for (permission in permissions) {
+                        check(checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                            "Permission \"$permission\" is not granted!"
+                        }
+                    }
                     val scanner = adapter.bluetoothLeScanner ?: error("No scanner!")
                     scanner.startScan(null, scanSettings, scanCallback)
                 }
@@ -126,7 +138,28 @@ internal class BLEScannerService : Service() {
     }
 
     private fun onScanStop() {
-        TODO("BLEScannerService:onScanStop()")
+        coroutineScope.launch {
+            _states.value = null
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    val scanner = getSystemService(BluetoothManager::class.java)
+                        .adapter
+                        .bluetoothLeScanner
+                        ?: error("No scanner!")
+                    scanner.stopScan(scanCallback)
+                }
+            }.fold(
+                onSuccess = {
+                    _states.value = State.Stopped
+                },
+                onFailure = { error ->
+                    logger.warning("on scan stop error: $error")
+                    _events.emit(Event.OnError(error))
+                    _states.value = State.Stopped
+                },
+            )
+            unregisterReceiver(receivers)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
