@@ -35,7 +35,10 @@ import test.android.bles.App
 import test.android.bles.BuildConfig
 import test.android.bles.entity.BTDevice
 import java.util.Date
+import java.util.Locale
 import kotlin.math.absoluteValue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 internal class BLEScannerService : Service() {
     sealed interface Event {
@@ -92,6 +95,15 @@ internal class BLEScannerService : Service() {
             }
         }
     }
+    private var started: Duration = Duration.ZERO
+    private var last: Duration = Duration.ZERO
+    private fun toString(duration: Duration): String {
+        val h = duration.inWholeHours
+        val m = duration.inWholeMinutes % 60
+        val s = duration.inWholeSeconds % 60
+        val ms = duration.inWholeMilliseconds % 1000
+        return String.format(Locale.US, "%02d:%02d:%02d:%03d", h, m, s, ms)
+    }
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             if (result == null) return
@@ -105,10 +117,13 @@ internal class BLEScannerService : Service() {
                 rssi: ${result.rssi}
             """.trimIndent()
             logger.debug(message)
+            val now = System.currentTimeMillis().milliseconds
+            if (last.inWholeMinutes != now.inWholeMinutes) {
+                last = now
+                logger.debug(" - scan:time: ${toString(now - started)}")
+            }
             coroutineScope.launch {
-                _events.emit(
-                    Event.OnBTDevice(device = device),
-                )
+                _events.emit(Event.OnBTDevice(device = device))
             }
         }
     }
@@ -140,6 +155,9 @@ internal class BLEScannerService : Service() {
                 }
             }.fold(
                 onSuccess = {
+                    val now = System.currentTimeMillis().milliseconds
+                    started = now
+                    logger.debug("scan:started: ${Date(now.inWholeMilliseconds)}")
                     val filter = IntentFilter().also {
                         it.addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                         it.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
@@ -154,7 +172,6 @@ internal class BLEScannerService : Service() {
                         TODO("BLEScannerService:onScanStart($scanSettings):onSuccess")
                     }
                     _states.value = State.Started
-                    logger.debug("started: ${Date()}")
                 },
                 onFailure = { error ->
                     logger.warning("on scan start error: $error")
@@ -186,6 +203,13 @@ internal class BLEScannerService : Service() {
                     _states.value = State.Stopped
                 },
             )
+            val now = System.currentTimeMillis().milliseconds
+            val message = """
+                scan:stopped: ${Date(now.inWholeMilliseconds)}
+                scan:started: ${Date(started.inWholeMilliseconds)}
+                scan:time: ${toString(now - started)}
+            """.trimIndent()
+            logger.debug(message)
             unregisterReceiver(receivers)
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             stopForeground(STOP_FOREGROUND_REMOVE)
