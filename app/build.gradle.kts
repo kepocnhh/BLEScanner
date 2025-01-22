@@ -99,6 +99,10 @@ androidComponents.onVariants { variant ->
                     "android.permission.BLUETOOTH_SCAN",
                     "android.permission.ACCESS_COARSE_LOCATION",
                     "android.permission.ACCESS_FINE_LOCATION",
+//                    "android.permission.ACCESS_BACKGROUND_LOCATION",
+                    "android.permission.FOREGROUND_SERVICE",
+                    "android.permission.FOREGROUND_SERVICE_LOCATION",
+                    "android.permission.POST_NOTIFICATIONS",
                     "$applicationId.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
                 )
                 check(actual.sorted() == expected.sorted()) {
